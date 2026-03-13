@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Linux Desktop - HELI ESCAPE</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #0a1f0a;
+            overflow: hidden;
+            height: 100vh;
+            font-family: "Ubuntu", "DejaVu Sans", monospace;
+            color: #0f0;
+            user-select: none;
+        }
+        /* Desktop */
+        #desktop {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: url('img/desktop-bg.png') center/cover;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .icon {
+            position: absolute;
+            top: 80px;
+            left: 80px;
+            width: 90px;
+            text-align: center;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .icon:hover { transform: scale(1.12); }
+        .icon img {
+            width: 64px;
+            height: 64px;
+            image-rendering: pixelated;
+            filter: drop-shadow(0 0 10px #0f0);
+        }
+        .icon-label {
+            margin-top: 8px;
+            font-size: 13px;
+            text-shadow: 0 0 6px #000;
+            background: rgba(0,0,0,0.5);
+            padding: 2px 10px;
+            border-radius: 4px;
+            display: inline-block;
+        }
+        /* Loading Screen */
+        #loading {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: #000;
+            color: #0f0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            font-size: 28px;
+            z-index: 100;
+        }
+        .spinner {
+            width: 60px;
+            height: 60px;
+            border: 6px solid #0a0;
+            border-top-color: #0f0;
+            border-radius: 50%;
+            animation: spin 1.2s linear infinite;
+            margin-bottom: 30px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Game Container */
+        #game-container {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        /* TERMINAL HACK CONTAINER */
+        #hack-container {
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            display: none;
+            background: #001100 url('img/terminal-bg.jpg') center/cover;
+            z-index: 50;
+            overflow: hidden;
+        }
+
+        /* Terminal Window Styling */
+        .terminal {
+            position: absolute;
+            background: #1e1e2e;
+            border: 3px solid #0f0;
+            box-shadow: 0 0 10px #0f0;
+            color: #0f0;
+            font-family: "Courier New", monospace;
+            font-size: 14px;
+            line-height: 1.4;
+            overflow: hidden;
+            opacity: 0;
+            transition: all 0.6s cubic-bezier(0.23, 1, 0.32, 1);
+            transform: scale(0.6) translateY(30px);
+
+        }
+        .terminal.visible {
+            opacity: 0.8;
+            transform: scale(1) translateY(0);
+        }
+        .titlebar {
+            background: #111122;
+            color: #0f0;
+            padding: 6px 12px;
+            font-size: 13px;
+            text-align: center;
+            border-bottom: 2px solid #0f0;
+            user-select: none;
+        }
+        .content {
+            padding: 10px;
+            height: calc(100% - 38px);
+            overflow: hidden;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Linux Desktop -->
+    <div id="desktop">
+        <div class="icon" onclick="startLoading()">
+            <img src="img/desktop-icon.png" alt="login">
+            <div class="icon-label">Login</div>
+        </div>
+    </div>
+
+    <!-- 3-Second Loading Screen -->
+    <div id="loading">
+        <div class="spinner"></div>
+        <div>INITIALIZING MI6 SECURE TERMINAL...</div>
+        <div style="font-size:16px; margin-top:40px; opacity:0.7;">Authenticating clearance level OMEGA</div>
+    </div>
+
+    <!-- The Game -->
+    <div id="game-container">
+        <canvas id="game" width="800" height="400"></canvas>
+    </div>
+
+    <!-- Terminal Hack Container (directly under body) -->
+    <div id="hack-container"></div>
+
+    <script>
+        // ====================== CUSTOM SETTINGS ======================
+        const CONFIG = {
+            WIN_SCORE: 20,
+            jetSpeed: 3.1,
+            bulletSpeed: -3.6,
+            spawnRate: 0.023,
+
+            shootSound: "https://freesound.org/data/previews/276/276951_5121236-lq.mp3",
+            crashSound: "https://freesound.org/data/previews/276/276952_5121236-lq.mp3",
+            victorySound: "https://freesound.org/data/previews/320/320186_5270808-lq.mp3",
+
+            shootVolume: 0.6,
+            crashVolume: 0.8,
+            victoryVolume: 0.7,
+        };
+        // =============================================================
+
+        let gameInitialized = false;
+
+        function startLoading() {
+            document.getElementById('desktop').style.display = 'none';
+            document.getElementById('loading').style.display = 'flex';
+
+            setTimeout(() => {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('game-container').style.display = 'block';
+                
+                if (!gameInitialized) {
+                    initGame();
+                    gameInitialized = true;
+                }
+            }, 3000);
+        }
+
+        function initGame() {
+            const canvas = document.getElementById('game');
+            const ctx = canvas.getContext('2d');
+            const hackContainer = document.getElementById('hack-container');
+
+            let heli = { x: 150, y: 180, width: 52, height: 28 };
+            let velocityX = 0, velocityY = 0;
+            let scrollSpeed = 2.8;
+            let score = 0;
+            let gameOver = false;
+            let crashStartTime = 0;
+            let gameStarted = false;
+            let hacked = false;
+
+            let keys = {};
+            let enemies = [];
+            let bullets = [];
+            let particles = [];
+            let rotorAngle = 0;
+            let cloudOffset = 0;
+
+            function playSound(type) {
+                const url = type === 'shoot' ? CONFIG.shootSound : type === 'crash' ? CONFIG.crashSound : CONFIG.victorySound;
+                const vol = type === 'shoot' ? CONFIG.shootVolume : type === 'crash' ? CONFIG.crashVolume : CONFIG.victoryVolume;
+                const snd = new Audio(url);
+                snd.volume = vol;
+                snd.play().catch(()=>{});
+            }
+
+            const secretPool = [
+                "fixer@mi6-gchq:~$ tail -f /var/log/intruder.log",
+                "2026-03-12 11:17:04 [CRITICAL] HELI-001 SIGNAL ACQUIRED",
+                "sudo quantum-decrypt --key 8713 --force",
+                "GCHQ FIREWALL BREACHED IN 2.8s",
+                "AGENT STATUS: COMPROMISED",
+                "CLASSIFIED://OPERATION-SKYGUARD/HELICOPTER-LIVE",
+                "51.5074°N 0.1278°W  LIVE DRONE FEED ACTIVE",
+                "ENCRYPTION: AES-256 → CRACKED",
+                "ls -la /classified/mi6-heli-access/",
+                "cat /etc/mi6/agents.db | grep HELI",
+                "ssh root@secure.mi6.gov.uk -p 8713",
+                "ACCESS LEVEL OMEGA GRANTED",
+                "systemctl restart british-intel-mainframe"
+            ];
+
+            let terminals = [];
+
+            function spawnEnemy() {
+                if (hacked) return;
+                enemies.push({x: canvas.width + 40, y: 50 + Math.random() * (canvas.height - 160), width: 58, height: 26, shootTimer: 45 + Math.random() * 35});
+            }
+
+            function checkCollision(a, b) {
+                return !(a.x + a.width < b.x || b.x + b.width < a.x || a.y + a.height < b.y || b.y + b.height < a.y);
+            }
+
+            function createExplosion(count, x, y) {
+                for (let i = 0; i < count; i++) {
+                    particles.push({x: x + Math.random()*45, y: y + Math.random()*30, vx: -9 + Math.random()*18, vy: -9 + Math.random()*16, life: 90, color: '#ff8800'});
+                }
+            }
+
+            function drawFighterJet(x, y) {
+                ctx.save();
+                ctx.translate(x + 29, y + 13);
+                ctx.fillStyle = '#2a2a2a'; ctx.fillRect(-29, -8, 58, 16);
+                ctx.fillStyle = '#c22'; ctx.fillRect(-24, -12, 22, 8);
+                ctx.fillStyle = '#1a1a1a'; ctx.fillRect(-29, -3, 12, 6);
+                ctx.fillRect(18, -13, 14, 5);
+                ctx.fillStyle = '#ddd'; ctx.fillRect(22, -4, 9, 3);
+                ctx.restore();
+            }
+
+            function drawHelicopter() {
+                ctx.save();
+                ctx.translate(heli.x + 38, heli.y + 19);
+
+                ctx.fillStyle = '#0b3d0b';
+                ctx.fillRect(-36, -14, 78, 30);
+                ctx.fillStyle = '#1a5c1a';
+                ctx.fillRect(-34, -16, 52, 12);
+
+                ctx.fillStyle = '#0b3d0b';
+                ctx.fillRect(22, -13, 26, 24);
+
+                ctx.fillStyle = '#a0f0ff';
+                ctx.fillRect(28, -11, 18, 14);
+                ctx.fillStyle = '#77ddff';
+                ctx.fillRect(30, -9, 14, 10);
+
+                ctx.fillStyle = '#88eeff';
+                ctx.fillRect(48, -6, 8, 8);
+
+                ctx.fillStyle = '#0b3d0b';
+                ctx.fillRect(-52, -6, 22, 10);
+                ctx.fillRect(-56, -18, 8, 22);
+
+                ctx.fillStyle = '#222222';
+                ctx.fillRect(-26, 16, 10, 4);
+                ctx.fillRect(18, 16, 10, 4);
+                ctx.fillRect(-22, 12, 3, 6);
+                ctx.fillRect(24, 12, 3, 6);
+
+                ctx.fillStyle = '#111';
+                ctx.fillRect(-28, 19, 6, 4);
+                ctx.fillRect(22, 19, 6, 4);
+
+                // Main rotor
+                ctx.save();
+                ctx.translate(8, -18);
+                ctx.fillStyle = '#333333';
+                ctx.fillRect(-3, -8, 6, 16);
+
+                ctx.rotate(rotorAngle * Math.PI / 180);
+                ctx.fillStyle = '#1c1c1c';
+                ctx.fillRect(-46, -2.5, 92, 5);
+                ctx.fillStyle = '#555555';
+                ctx.fillRect(-44, -3.5, 88, 2);
+
+                ctx.globalAlpha = 0.35;
+                ctx.fillStyle = '#888888';
+                ctx.fillRect(-42, -1.5, 84, 3);
+                ctx.globalAlpha = 1.0;
+
+                ctx.fillStyle = '#444444';
+                ctx.fillRect(-8, -8, 16, 16);
+                ctx.fillStyle = '#222222';
+                ctx.fillRect(-5, -5, 10, 10);
+                ctx.restore();
+
+                // Tail rotor
+                ctx.save();
+                ctx.translate(heli.x - 36, heli.y + 3);
+                ctx.rotate(rotorAngle * 5.8 * Math.PI / 180);
+                ctx.fillStyle = '#222222';
+                ctx.fillRect(-9, -2.5, 18, 5);
+                ctx.fillStyle = '#444444';
+                ctx.fillRect(-7, -3.5, 4, 7);
+                ctx.restore();
+
+                ctx.restore();
+            }
+
+            function drawBullet(x, y) {
+                ctx.fillStyle = '#f44'; ctx.fillRect(x, y, 14, 4);
+                ctx.fillStyle = '#ff0'; ctx.fillRect(x+3, y+1, 6, 2);
+            }
+
+            function startHackSequence() {
+                hacked = true;
+                hackContainer.style.display = 'block';
+                canvas.style.display = 'none';
+                playSound('victory');
+
+                const terminalData = [
+                    {x: "3%",  y: "4%",  w: "28%", h: "32%", title: "fixer@mi6-london-01:~/Desktop", delay: 100},
+                    {x: "35%", y: "6%",  w: "32%", h: "29%", title: "fixer@gchq-secure-02:~/ops", delay: 250},
+                    {x: "70%", y: "8%",  w: "27%", h: "34%", title: "root@british-intel-03:~", delay: 400},
+                    {x: "5%",  y: "22%", w: "600px", h: "550px", title: "root@auth-server-04:~", delay: 600, frozen: true},
+                    {x: "38%", y: "40%", w: "31%", h: "30%", title: "fixer@mi6-mainframe:~/classified", delay: 750},
+                    {x: "72%", y: "48%", w: "25%", h: "26%", title: "root@quantum-05:~/logs", delay: 900},
+                    {x: "8%",  y: "80%", w: "26%", h: "17%", title: "fixer@mi6-drone-feed:~", delay: 1050},
+                    {x: "37%", y: "78%", w: "29%", h: "19%", title: "root@secure-06:/var/log", delay: 1200},
+                    {x: "68%", y: "78%", w: "29%", h: "19%", title: "root@intel-relay-07:~", delay: 1350},
+                    {x: "4%",  y: "22%", w: "24%", h: "18%", title: "fixer@drone-control-08:~", delay: 1500}
+                ];
+
+                terminals = [];
+                terminalData.forEach((data, i) => {
+                    const term = document.createElement('div');
+                    term.className = 'terminal';
+                    term.style.left = data.x;
+                    term.style.top = data.y;
+                    term.style.width = data.w;
+                    term.style.height = data.h;
+                    term.style.zIndex = data.frozen ? 999 : 10 + i;
+
+                    term.innerHTML = `
+                        <div class="titlebar">${data.title}</div>
+                        <div class="content"></div>
+                    `;
+                    const content = term.querySelector('.content');
+                    let lines = [];
+                    for (let j = 0; j < 6; j++) lines.push(secretPool[Math.floor(Math.random()*secretPool.length)]);
+                    content.innerHTML = lines.join('<br>');
+
+                    hackContainer.appendChild(term);
+                    terminals.push({element: term, content: content, lines: lines, frozen: data.frozen || false});
+
+                    setTimeout(() => term.classList.add('visible'), data.delay);
+                });
+
+                setTimeout(() => {
+                    if (terminals[3]) {
+                        terminals[3].frozen = true;
+                        terminals[3].content.innerHTML = `
+                            ┌────────────────────────────────────────────────────────────┐<br>
+                            │ MI6 AUTHENTICATION SERVER v4.2                             │<br>
+                            ├────────────────────────────────────────────────────────────┤<br>
+                            │                                                            │<br>
+                            │   CONGRATULATIONS                                          │<br>
+                            │   YOU'VE BEEN AUTHENTICATED!                               │<br>
+                            │                                                            │<br>
+                            │   YOUR ACCESS CODE IS <span style="color:#ffff00">8713</span>                               │<br>
+                            │                                                            │<br>
+                            │   MISSION COMPLETE - WELCOME AGENT                         │<br>
+                            │                                                            │<br>
+                            └────────────────────────────────────────────────────────────┘
+                        `;
+                    }
+                }, 6000);
+            }
+
+            function updateTerminals() {
+                if (!hacked) return;
+                terminals.forEach(t => {
+                    if (t.frozen) return;
+                    if (Math.random() < 0.26) {
+                        t.lines.push(secretPool[Math.floor(Math.random()*secretPool.length)]);
+                        if (t.lines.length > 9) t.lines.shift();
+                        t.content.innerHTML = t.lines.join('<br>');
+                    }
+                });
+            }
+
+            function drawBackground() {
+                if (hacked) return;
+                ctx.fillStyle = '#0a1428'; ctx.fillRect(0,0,canvas.width,canvas.height);
+                cloudOffset = (cloudOffset + 0.4) % 220;
+                ctx.fillStyle = '#223355';
+                for (let i = -1; i < 6; i++) {
+                    const cx = (i*220 + cloudOffset) % (canvas.width+440) -120;
+                    ctx.fillRect(cx,55,92,22);
+                    ctx.fillRect(cx+18,42,48,14);
+                }
+                ctx.fillStyle = '#1a2a0f'; ctx.fillRect(0,330,canvas.width,70);
+                ctx.fillStyle = '#0f1f08';
+                for (let x = 0; x < canvas.width; x += 20) {
+                    const gx = (x - (scrollSpeed*1.8)%20);
+                    ctx.fillRect(gx,332,14,12);
+                }
+            }
+
+            function update() {
+                if (!gameStarted || hacked) return;
+
+                rotorAngle += 32;
+
+                velocityX = 0;
+                velocityY = 1.4;
+
+                if (keys['ArrowUp'])    velocityY = -5.2;
+                if (keys['ArrowLeft'])  velocityX = -4.8;
+                if (keys['ArrowRight']) velocityX =  4.8;
+
+                heli.x += velocityX;
+                heli.y += velocityY;
+
+                if (heli.y <= 25 || heli.y >= canvas.height - 75 || 
+                    enemies.some(e => checkCollision(heli, e)) ||
+                    bullets.some(b => checkCollision(heli, {x:b.x, y:b.y, width:14, height:4}))) {
+                    
+                    if (!gameOver) {
+                        gameOver = true;
+                        crashStartTime = Date.now();
+                        createExplosion(100, heli.x, heli.y);
+                        playSound('crash');
+                        score = Math.floor(score);
+                    }
+                }
+
+                heli.x = Math.max(40, Math.min(canvas.width - 130, heli.x));
+                heli.y = Math.max(25, Math.min(canvas.height - 75, heli.y));
+
+                for (let i = enemies.length-1; i >= 0; i--) {
+                    let e = enemies[i];
+                    e.x -= CONFIG.jetSpeed;
+                    e.shootTimer--;
+                    if (e.shootTimer <= 0) {
+                        bullets.push({x: e.x + 12, y: e.y + 11, vx: CONFIG.bulletSpeed});
+                        playSound('shoot');
+                        e.shootTimer = 75 + Math.random() * 45;
+                    }
+                    if (e.x < -80) enemies.splice(i,1);
+                }
+
+                for (let i = bullets.length-1; i >= 0; i--) {
+                    let b = bullets[i];
+                    b.x += b.vx;
+                    if (b.x < -20) bullets.splice(i,1);
+                }
+
+                if (Math.random() < CONFIG.spawnRate) spawnEnemy();
+                if (!gameOver) score += 0.19;
+
+                if (score >= CONFIG.WIN_SCORE && !hacked) {
+                    startHackSequence();
+                }
+
+                for (let i = particles.length-1; i >= 0; i--) {
+                    let p = particles[i];
+                    p.x += p.vx; p.y += p.vy; p.vy += 0.18; p.life--;
+                    if (p.life <= 0) particles.splice(i,1);
+                }
+            }
+
+            function draw() {
+                ctx.imageSmoothingEnabled = false;
+                if (hacked) return;
+
+                drawBackground();
+                for (let e of enemies) drawFighterJet(e.x, e.y);
+                for (let b of bullets) drawBullet(b.x, b.y);
+
+                for (let p of particles) {
+                    ctx.fillStyle = p.color;
+                    const s = Math.max(2, p.life/9);
+                    ctx.fillRect(p.x, p.y, s, s);
+                }
+
+                if (!gameOver) drawHelicopter();
+
+                ctx.fillStyle = '#0f0';
+                ctx.font = 'bold 22px monospace';
+                ctx.textAlign = 'left';
+                ctx.fillText('SCORE ' + Math.floor(score), 28, 38);
+
+                if (gameOver) {
+                    const elapsed = Date.now() - crashStartTime;
+                    if (elapsed < 3000) {
+                        ctx.save();
+                        ctx.translate(heli.x + 32, heli.y + 18);
+                        ctx.rotate(35 * Math.PI / 180);
+                        ctx.fillStyle = '#063306';
+                        ctx.fillRect(-28, -10, 58, 24);
+                        ctx.restore();
+                    } else {
+                        ctx.fillStyle = '#000000';
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+                        ctx.fillStyle = '#ff0000';
+                        ctx.font = 'bold 48px monospace';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('UNAUTHORIZED ACCESS!', canvas.width/2, canvas.height/2);
+                    }
+                }
+
+                if (!gameStarted) {
+                    ctx.fillStyle = '#ff0';
+                    ctx.font = 'bold 34px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('PRESS ANY ARROW KEY TO START', canvas.width/2, 220);
+                }
+            }
+
+            function gameLoop() {
+                update();
+                draw();
+                if (hacked) updateTerminals();
+                requestAnimationFrame(gameLoop);
+            }
+
+            window.addEventListener('keydown', e => {
+                keys[e.key] = true;
+                if (!gameStarted && e.key.startsWith('Arrow')) gameStarted = true;
+                if ((gameOver || hacked) && e.key.toLowerCase() === 'r') {
+                    location.reload();
+                }
+            });
+
+            window.addEventListener('keyup', e => keys[e.key] = false);
+
+            gameLoop();
+
+            setTimeout(() => {
+                if (!enemies.length && !hacked) spawnEnemy();
+            }, 500);
+        }
+    </script>
+</body>
+</html>
