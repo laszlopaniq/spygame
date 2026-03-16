@@ -132,19 +132,16 @@
             <div class="icon-label">Login</div>
         </div>
     </div>
-
     <!-- 3-Second Loading Screen -->
     <div id="loading">
         <div class="spinner"></div>
         <div>INITIALIZING MI6 SECURE TERMINAL...</div>
         <div style="font-size:16px; margin-top:40px; opacity:0.7;">Authenticating clearance level OMEGA</div>
     </div>
-
     <!-- The Game -->
     <div id="game-container">
         <canvas id="game" width="800" height="400"></canvas>
     </div>
-
     <!-- Terminal Hack Container -->
     <div id="hack-container"></div>
 
@@ -175,7 +172,7 @@
             setTimeout(() => {
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('game-container').style.display = 'block';
-              
+             
                 if (!gameInitialized) {
                     initGame();
                     gameInitialized = true;
@@ -254,7 +251,6 @@
                 }
             }
             function drawFighterJet(x, y) {
-                // First draw the jet body (so afterburner appears behind)
                 if (jetImg.complete && jetImg.naturalWidth !== 0) {
                     ctx.drawImage(jetImg, x, y, 132, 53);
                 } else {
@@ -267,7 +263,6 @@
                     ctx.fillStyle = '#ddd'; ctx.fillRect(22, -4, 9, 3);
                     ctx.restore();
                 }
-                // ====================== AFTERBURNER SETTINGS ======================
                 const showAfterburner = enemies.some(e => e.shootTimer < 25);
                 const afterburnerX = x + 115;
                 const afterburnerY = y + 30;
@@ -286,7 +281,6 @@
                     ctx.fillRect(-afterburnerLength * 0.9, -afterburnerWidth/2.8, afterburnerLength * 0.6, afterburnerWidth/1.4);
                     ctx.restore();
                 }
-                // ====================== END AFTERBURNER SETTINGS ======================
             }
             function drawHelicopter() {
                 ctx.save();
@@ -318,31 +312,25 @@
                     ctx.fillRect(-28, 19, 6, 4);
                     ctx.fillRect(22, 19, 6, 4);
                 }
-                // ====================== MAIN ROTOR SETTINGS ======================
                 ctx.save();
-                ctx.translate(12, -13); // Y position: lower number = higher up
-                // Vertical mast
+                ctx.translate(12, -13);
                 ctx.fillStyle = '#333333';
                 ctx.fillRect(-3, -12, 6, 20);
-                // Blade blink timing
-                const blink = Math.floor(rotorAngle / 6) % 2 === 0; // smaller number = faster blink
+                const blink = Math.floor(rotorAngle / 6) % 2 === 0;
                 if (blink) {
                     ctx.fillStyle = '#1c1c1c';
-                    ctx.fillRect(-38, -3, 76, 5); // change 38 to make blades shorter
+                    ctx.fillRect(-38, -3, 76, 5);
                     ctx.fillStyle = '#555555';
                     ctx.fillRect(-36, -4, 72, 2);
                 } else {
                     ctx.fillStyle = '#555555';
                     ctx.fillRect(-38, -2.5, 76, 5);
                 }
-                // Hub
                 ctx.fillStyle = '#444444';
                 ctx.fillRect(-7, -7, 14, 14);
                 ctx.fillStyle = '#222222';
                 ctx.fillRect(-4, -4, 8, 8);
                 ctx.restore();
-                // ====================== END ROTOR SETTINGS ======================
-                // Tail rotor
                 ctx.save();
                 ctx.translate(-36, 3);
                 ctx.rotate(rotorAngle * 5.8 * Math.PI / 180);
@@ -459,7 +447,7 @@
                 if (heli.y <= 25 || heli.y >= canvas.height - 75 ||
                     enemies.some(e => checkCollision(heli, e)) ||
                     bullets.some(b => checkCollision(heli, {x:b.x, y:b.y, width:14, height:4}))) {
-                  
+                 
                     if (!gameOver) {
                         gameOver = true;
                         crashStartTime = Date.now();
@@ -467,6 +455,11 @@
                         playSound('crash');
                         stopRotorSound();
                         score = Math.floor(score);
+
+                        // DIFFERENT SOLUTION FOR REFRESH — scheduled once when crash happens
+                        setTimeout(() => {
+                            location.reload();
+                        }, 7000);   // 3s explosion + 4s message
                     }
                 }
                 heli.x = Math.max(40, Math.min(canvas.width - 130, heli.x));
@@ -514,26 +507,21 @@
                 ctx.font = 'bold 22px monospace';
                 ctx.textAlign = 'left';
                 ctx.fillText('SCORE ' + Math.floor(score), 28, 38);
-
                 if (gameOver) {
                     const elapsed = Date.now() - crashStartTime;
                     if (elapsed < 3000) {
                         // Show explosion particles for 3 seconds
-                        // No helicopter body (as requested)
                     } else if (elapsed < 7000) {
-                        // Show Unauthorized message for 4 seconds (from 3s to 7s)
+                        // Show Unauthorized message for 4 seconds
                         ctx.fillStyle = '#000000';
                         ctx.fillRect(0, 0, canvas.width, canvas.height);
                         ctx.fillStyle = '#ff0000';
                         ctx.font = 'bold 48px monospace';
                         ctx.textAlign = 'center';
                         ctx.fillText('UNAUTHORIZED ACCESS!', canvas.width/2, canvas.height/2);
-                    } else {
-                        // Auto refresh after total 7 seconds
-                        location.reload();
                     }
+                    // NO reload here anymore — the setTimeout above handles it
                 }
-
                 if (!gameStarted) {
                     ctx.fillStyle = '#ff0';
                     ctx.font = 'bold 34px monospace';
