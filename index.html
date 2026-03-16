@@ -151,27 +151,24 @@
     <script>
         // ====================== CUSTOM SETTINGS ======================
         const CONFIG = {
-            WIN_SCORE: 100,
+            WIN_SCORE: 200,
             jetSpeed: 3.1,
             bulletSpeed: -3.6,
             spawnRate: 0.023,
-
-            // ← Replace these URLs with your own helicopter and jet PNGs (transparent background recommended)
-            helicopterImgSrc: "img/helicopter.png",  // placeholder helicopter
-            fighterJetImgSrc: "img/jet.png",   // placeholder fighter jet
-
+            helicopterImgSrc: "img/helicopter.png",
+            fighterJetImgSrc: "img/jet.png",
             shootSound: "https://freesound.org/data/previews/276/276951_5121236-lq.mp3",
-            crashSound: "https://freesound.org/data/previews/276/276952_5121236-lq.mp3",
-            victorySound: "https://freesound.org/data/previews/320/320186_5270808-lq.mp3",
-
+            crashSound: "sound/crash.mp3",
+            victorySound: "sound/victory.mp3",
+            rotorSound: "sound/rotor.mp3",
             shootVolume: 0.6,
             crashVolume: 0.8,
             victoryVolume: 0.7,
+            rotorVolume: 0.5,
         };
         // =============================================================
-
         let gameInitialized = false;
-
+        let rotorAudio = null;
         function startLoading() {
             document.getElementById('desktop').style.display = 'none';
             document.getElementById('loading').style.display = 'flex';
@@ -185,20 +182,18 @@
                 }
             }, 3000);
         }
-
         function initGame() {
             const canvas = document.getElementById('game');
             const ctx = canvas.getContext('2d');
             const hackContainer = document.getElementById('hack-container');
-
-            // Load placeholder images
             const heliImg = new Image();
             heliImg.src = CONFIG.helicopterImgSrc;
-
             const jetImg = new Image();
             jetImg.src = CONFIG.fighterJetImgSrc;
-
-            let heli = { x: 150, y: 180, width: 80, height: 40 }; // adjust to match your image size
+            rotorAudio = new Audio(CONFIG.rotorSound);
+            rotorAudio.loop = true;
+            rotorAudio.volume = CONFIG.rotorVolume;
+            let heli = { x: 150, y: 180, width: 80, height: 40 };
             let velocityX = 0, velocityY = 0;
             let scrollSpeed = 2.8;
             let score = 0;
@@ -206,22 +201,30 @@
             let crashStartTime = 0;
             let gameStarted = false;
             let hacked = false;
-
             let keys = {};
             let enemies = [];
             let bullets = [];
             let particles = [];
             let rotorAngle = 0;
             let cloudOffset = 0;
-
             function playSound(type) {
-                const url = type === 'shoot' ? CONFIG.shootSound : type === 'crash' ? CONFIG.crashSound : CONFIG.victorySound;
-                const vol = type === 'shoot' ? CONFIG.shootVolume : type === 'crash' ? CONFIG.crashVolume : CONFIG.victoryVolume;
+                const url = type === 'shoot' ? CONFIG.shootSound :
+                           type === 'crash' ? CONFIG.crashSound : CONFIG.victorySound;
+                const vol = type === 'shoot' ? CONFIG.shootVolume :
+                           type === 'crash' ? CONFIG.crashVolume : CONFIG.victoryVolume;
                 const snd = new Audio(url);
                 snd.volume = vol;
                 snd.play().catch(()=>{});
             }
-
+            function startRotorSound() {
+                if (rotorAudio) rotorAudio.play().catch(() => {});
+            }
+            function stopRotorSound() {
+                if (rotorAudio) {
+                    rotorAudio.pause();
+                    rotorAudio.currentTime = 0;
+                }
+            }
             const secretPool = [
                 "fixer@mi6-gchq:~$ tail -f /var/log/intruder.log",
                 "2026-03-12 11:17:04 [CRITICAL] HELI-001 SIGNAL ACQUIRED",
@@ -229,7 +232,7 @@
                 "GCHQ FIREWALL BREACHED IN 2.8s",
                 "AGENT STATUS: COMPROMISED",
                 "CLASSIFIED://OPERATION-SKYGUARD/HELICOPTER-LIVE",
-                "51.5074°N 0.1278°W  LIVE DRONE FEED ACTIVE",
+                "51.5074°N 0.1278°W LIVE DRONE FEED ACTIVE",
                 "ENCRYPTION: AES-256 → CRACKED",
                 "ls -la /classified/mi6-heli-access/",
                 "cat /etc/mi6/agents.db | grep HELI",
@@ -237,29 +240,24 @@
                 "ACCESS LEVEL OMEGA GRANTED",
                 "systemctl restart british-intel-mainframe"
             ];
-
             let terminals = [];
-
             function spawnEnemy() {
                 if (hacked) return;
                 enemies.push({x: canvas.width + 40, y: 50 + Math.random() * (canvas.height - 160), width: 58, height: 26, shootTimer: 45 + Math.random() * 35});
             }
-
             function checkCollision(a, b) {
                 return !(a.x + a.width < b.x || b.x + b.width < a.x || a.y + a.height < b.y || b.y + b.height < a.y);
             }
-
             function createExplosion(count, x, y) {
                 for (let i = 0; i < count; i++) {
                     particles.push({x: x + Math.random()*45, y: y + Math.random()*30, vx: -9 + Math.random()*18, vy: -9 + Math.random()*16, life: 90, color: '#ff8800'});
                 }
             }
-
             function drawFighterJet(x, y) {
+                // First draw the jet body (so afterburner appears behind)
                 if (jetImg.complete && jetImg.naturalWidth !== 0) {
-                    ctx.drawImage(jetImg, x, y, 100, 40); // ← adjust width/height to fit your image
+                    ctx.drawImage(jetImg, x, y, 132, 53);
                 } else {
-                    // fallback rectangle drawing
                     ctx.save();
                     ctx.translate(x + 29, y + 13);
                     ctx.fillStyle = '#2a2a2a'; ctx.fillRect(-29, -8, 58, 16);
@@ -269,16 +267,47 @@
                     ctx.fillStyle = '#ddd'; ctx.fillRect(22, -4, 9, 3);
                     ctx.restore();
                 }
-            }
 
+                // ====================== AFTERBURNER SETTINGS ======================
+                // Afterburner only appears when the jet is about to shoot
+                // Change these values to tweak appearance:
+
+                const showAfterburner = enemies.some(e => e.shootTimer < 25); // lower number = flame shows less often when shooting
+                const afterburnerX = x + 115;          // ← horizontal position (smaller = more to the left / rear of jet)
+                const afterburnerY = y + 30;           // ← vertical position (adjust to line up with jet exhaust)
+                const afterburnerLength = 23;          // ← how long the flame stretches backward
+                const afterburnerWidth = 3;            // ← how wide the flame is
+                const intensity = 0.85;                // ← overall brightness (0.0 to 1.0) - increase for stronger flame
+
+                // Blink / flicker speed (smaller number = faster blink)
+                const flicker = Math.random() > 0.1;   // change 0.3 to 0.5 for less flicker, 0.1 for very rapid
+
+                if (showAfterburner && flicker) {
+                    ctx.save();
+                    ctx.translate(afterburnerX, afterburnerY);
+
+                    // Main orange flame
+                    ctx.fillStyle = `rgba(255, 100, 0, ${intensity})`;
+                    ctx.fillRect(-afterburnerLength, -afterburnerWidth/2, afterburnerLength, afterburnerWidth);
+
+                    // Bright yellow core
+                    ctx.fillStyle = `rgba(255, 220, 60, ${intensity * 0.95})`;
+                    ctx.fillRect(-afterburnerLength * 0.75, -afterburnerWidth/2.5, afterburnerLength * 0.75, afterburnerWidth/1.3);
+
+                    // Extra flicker glow
+                    ctx.fillStyle = `rgba(255, 255, 120, ${Math.random() * 0.5 + 0.4})`;
+                    ctx.fillRect(-afterburnerLength * 0.9, -afterburnerWidth/2.8, afterburnerLength * 0.6, afterburnerWidth/1.4);
+
+                    ctx.restore();
+                }
+                // ====================== END AFTERBURNER SETTINGS ======================
+            }
             function drawHelicopter() {
                 ctx.save();
                 ctx.translate(heli.x + 38, heli.y + 19);
-
                 if (heliImg.complete && heliImg.naturalWidth !== 0) {
-                    ctx.drawImage(heliImg, -40, -20, 80, 40); // ← adjust size & offset to fit your image
+                    ctx.drawImage(heliImg, -40, -20, 97, 49);
                 } else {
-                    // fallback rectangle drawing
                     ctx.fillStyle = '#0b3d0b';
                     ctx.fillRect(-36, -14, 78, 30);
                     ctx.fillStyle = '#1a5c1a';
@@ -303,27 +332,30 @@
                     ctx.fillRect(-28, 19, 6, 4);
                     ctx.fillRect(22, 19, 6, 4);
                 }
-
-                // Main rotor (still drawn on top)
+                // ====================== MAIN ROTOR SETTINGS ======================
                 ctx.save();
-                ctx.translate(8, -18);
+                ctx.translate(12, -13); // Y position: lower number = higher up
+                // Vertical mast
                 ctx.fillStyle = '#333333';
-                ctx.fillRect(-3, -8, 6, 16);
-                ctx.rotate(rotorAngle * Math.PI / 180);
-                ctx.fillStyle = '#1c1c1c';
-                ctx.fillRect(-46, -2.5, 92, 5);
-                ctx.fillStyle = '#555555';
-                ctx.fillRect(-44, -3.5, 88, 2);
-                ctx.globalAlpha = 0.35;
-                ctx.fillStyle = '#888888';
-                ctx.fillRect(-42, -1.5, 84, 3);
-                ctx.globalAlpha = 1.0;
+                ctx.fillRect(-3, -12, 6, 20);
+                // Blade blink timing
+                const blink = Math.floor(rotorAngle / 6) % 2 === 0; // smaller number = faster blink
+                if (blink) {
+                    ctx.fillStyle = '#1c1c1c';
+                    ctx.fillRect(-38, -3, 76, 5); // change 38 to make blades shorter
+                    ctx.fillStyle = '#555555';
+                    ctx.fillRect(-36, -4, 72, 2);
+                } else {
+                    ctx.fillStyle = '#555555';
+                    ctx.fillRect(-38, -2.5, 76, 5);
+                }
+                // Hub
                 ctx.fillStyle = '#444444';
-                ctx.fillRect(-8, -8, 16, 16);
+                ctx.fillRect(-7, -7, 14, 14);
                 ctx.fillStyle = '#222222';
-                ctx.fillRect(-5, -5, 10, 10);
+                ctx.fillRect(-4, -4, 8, 8);
                 ctx.restore();
-
+                // ====================== END ROTOR SETTINGS ======================
                 // Tail rotor
                 ctx.save();
                 ctx.translate(-36, 3);
@@ -333,17 +365,34 @@
                 ctx.fillStyle = '#444444';
                 ctx.fillRect(-7, -3.5, 4, 7);
                 ctx.restore();
-
                 ctx.restore();
             }
-
             function drawBullet(x, y) {
                 ctx.fillStyle = '#f44'; ctx.fillRect(x, y, 14, 4);
                 ctx.fillStyle = '#ff0'; ctx.fillRect(x+3, y+1, 6, 2);
             }
-
+            function drawBackground() {
+                if (hacked) return;
+                ctx.fillStyle = '#0a1428';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                cloudOffset = (cloudOffset + 0.4) % 220;
+                ctx.fillStyle = '#223355';
+                for (let i = -1; i < 6; i++) {
+                    const cx = (i * 220 + cloudOffset) % (canvas.width + 440) - 120;
+                    ctx.fillRect(cx, 55, 92, 22);
+                    ctx.fillRect(cx + 18, 42, 48, 14);
+                }
+                ctx.fillStyle = '#1a2a0f';
+                ctx.fillRect(0, 330, canvas.width, 70);
+                ctx.fillStyle = '#0f1f08';
+                for (let x = 0; x < canvas.width; x += 20) {
+                    const gx = (x - (scrollSpeed * 1.8) % 20);
+                    ctx.fillRect(gx, 332, 14, 12);
+                }
+            }
             function startHackSequence() {
                 hacked = true;
+                stopRotorSound();
                 document.getElementById('hack-container').style.display = 'block';
                 canvas.style.display = 'none';
                 playSound('victory');
@@ -385,22 +434,21 @@
                         terminals[3].frozen = true;
                         terminals[3].content.innerHTML = `
                             ┌────────────────────────────────────────────────────────────┐<br>
-                            │ MI6 AUTHENTICATION SERVER v4.2                             │<br>
+                            │ MI6 AUTHENTICATION SERVER v4.2 │<br>
                             ├────────────────────────────────────────────────────────────┤<br>
-                            │                                                            │<br>
-                            │   CONGRATULATIONS                                          │<br>
-                            │   YOU'VE BEEN AUTHENTICATED!                               │<br>
-                            │                                                            │<br>
-                            │   YOUR ACCESS CODE IS <span style="color:#ffff00">8713</span>                               │<br>
-                            │                                                            │<br>
-                            │   MISSION COMPLETE - WELCOME AGENT                         │<br>
-                            │                                                            │<br>
+                            │ │<br>
+                            │ CONGRATULATIONS │<br>
+                            │ YOU'VE BEEN AUTHENTICATED! │<br>
+                            │ │<br>
+                            │ YOUR ACCESS CODE IS <span style="color:#ffff00">8713</span> │<br>
+                            │ │<br>
+                            │ MISSION COMPLETE - WELCOME AGENT │<br>
+                            │ │<br>
                             └────────────────────────────────────────────────────────────┘
                         `;
                     }
                 }, 6000);
             }
-
             function updateTerminals() {
                 if (!hacked) return;
                 terminals.forEach(t => {
@@ -412,28 +460,9 @@
                     }
                 });
             }
-
-            function drawBackground() {
-                if (hacked) return;
-                ctx.fillStyle = '#0a1428'; ctx.fillRect(0,0,canvas.width,canvas.height);
-                cloudOffset = (cloudOffset + 0.4) % 220;
-                ctx.fillStyle = '#223355';
-                for (let i = -1; i < 6; i++) {
-                    const cx = (i*220 + cloudOffset) % (canvas.width+440) -120;
-                    ctx.fillRect(cx,55,92,22);
-                    ctx.fillRect(cx+18,42,48,14);
-                }
-                ctx.fillStyle = '#1a2a0f'; ctx.fillRect(0,330,canvas.width,70);
-                ctx.fillStyle = '#0f1f08';
-                for (let x = 0; x < canvas.width; x += 20) {
-                    const gx = (x - (scrollSpeed*1.8)%20);
-                    ctx.fillRect(gx,332,14,12);
-                }
-            }
-
             function update() {
                 if (!gameStarted || hacked) return;
-                rotorAngle += 32;
+                rotorAngle += 45;
                 velocityX = 0;
                 velocityY = 1.4;
                 if (keys['ArrowUp']) velocityY = -5.2;
@@ -450,6 +479,7 @@
                         crashStartTime = Date.now();
                         createExplosion(100, heli.x, heli.y);
                         playSound('crash');
+                        stopRotorSound();
                         score = Math.floor(score);
                     }
                 }
@@ -482,7 +512,6 @@
                     if (p.life <= 0) particles.splice(i,1);
                 }
             }
-
             function draw() {
                 ctx.imageSmoothingEnabled = false;
                 if (hacked) return;
@@ -501,20 +530,15 @@
                 ctx.fillText('SCORE ' + Math.floor(score), 28, 38);
                 if (gameOver) {
                     const elapsed = Date.now() - crashStartTime;
-                    if (elapsed < 3000) {
-                        ctx.save();
-                        ctx.translate(heli.x + 32, heli.y + 18);
-                        ctx.rotate(35 * Math.PI / 180);
-                        ctx.fillStyle = '#063306';
-                        ctx.fillRect(-28, -10, 58, 24);
-                        ctx.restore();
-                    } else {
+                    if (elapsed < 4000) {
                         ctx.fillStyle = '#000000';
                         ctx.fillRect(0, 0, canvas.width, canvas.height);
                         ctx.fillStyle = '#ff0000';
                         ctx.font = 'bold 48px monospace';
                         ctx.textAlign = 'center';
                         ctx.fillText('UNAUTHORIZED ACCESS!', canvas.width/2, canvas.height/2);
+                    } else {
+                        location.reload();
                     }
                 }
                 if (!gameStarted) {
@@ -524,26 +548,24 @@
                     ctx.fillText('PRESS ANY ARROW KEY TO START', canvas.width/2, 220);
                 }
             }
-
             function gameLoop() {
                 update();
                 draw();
                 if (hacked) updateTerminals();
                 requestAnimationFrame(gameLoop);
             }
-
             window.addEventListener('keydown', e => {
                 keys[e.key] = true;
-                if (!gameStarted && e.key.startsWith('Arrow')) gameStarted = true;
+                if (!gameStarted && e.key.startsWith('Arrow')) {
+                    gameStarted = true;
+                    startRotorSound();
+                }
                 if ((gameOver || hacked) && e.key.toLowerCase() === 'r') {
                     location.reload();
                 }
             });
-
             window.addEventListener('keyup', e => keys[e.key] = false);
-
             gameLoop();
-
             setTimeout(() => {
                 if (!enemies.length && !hacked) spawnEnemy();
             }, 500);
